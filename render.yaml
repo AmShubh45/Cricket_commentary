@@ -1,13 +1,9 @@
 services:
   - type: web
     name: cricket-commentary
-    runtime: python
+    runtime: docker
     plan: free
-    buildCommand: pip install -e "." && pip install mutagen
-    startCommand: python scripts/run_live_stream_server.py
     envVars:
-      - key: PYTHONPATH
-        value: src:config:.
       - key: PORT
         value: 8000
       - key: TTS_PROVIDER
@@ -18,3 +14,5 @@ services:
         value: free
       - key: DATA_FEED_PROVIDER
         value: cricbuzz
+      - key: CRICKET_MATCH_ID
+        value: "163061"
