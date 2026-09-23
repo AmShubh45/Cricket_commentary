@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <title>Cricket Scorecard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="broadcast-container" id="broadcast">
+        <!-- Full-screen background with gradient overlay -->
+        <div class="bg-overlay"></div>
+
+        <!-- ============================================ -->
+        <!-- TOP BAR — Match Info + Series -->
+        <!-- ============================================ -->
+        <div class="top-bar">
+            <div class="series-name" id="series-name">T20I Series 2026</div>
+            <div class="match-title" id="match-title">1st T20I • Wankhede Stadium, Mumbai</div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- MAIN SCORECARD — Bottom third overlay -->
+        <!-- ============================================ -->
+        <div class="scorecard-wrapper">
+            <!-- Team Score Section -->
+            <div class="score-panel">
+                <!-- Batting Team -->
+                <div class="team-section batting">
+                    <div class="team-badge">
+                        <div class="team-flag" id="batting-flag">🇮🇳</div>
+                        <span class="team-name" id="batting-team">IND</span>
+                    </div>
+                    <div class="score-block">
+                        <span class="score-runs" id="total-runs">156</span>
+                        <span class="score-separator">/</span>
+                        <span class="score-wickets" id="total-wickets">4</span>
+                    </div>
+                    <div class="overs-block">
+                        <span class="overs-label">OVERS</span>
+                        <span class="overs-value" id="total-overs">15.3</span>
+                    </div>
+                </div>
+
+                <!-- Divider -->
+                <div class="score-divider">
+                    <div class="divider-line"></div>
+                    <div class="vs-badge">VS</div>
+                    <div class="divider-line"></div>
+                </div>
+
+                <!-- Bowling Team -->
+                <div class="team-section bowling">
+                    <div class="team-badge">
+                        <div class="team-flag" id="bowling-flag">🇦🇺</div>
+                        <span class="team-name" id="bowling-team">AUS</span>
+                    </div>
+                    <div class="target-block" id="target-block" style="display: none;">
+                        <span class="target-label">TARGET</span>
+                        <span class="target-value" id="target-value">186</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Run Rate Bar -->
+            <div class="rate-bar">
+                <div class="rate-item">
+                    <span class="rate-label">CRR</span>
+                    <span class="rate-value" id="current-rr">10.06</span>
+                </div>
+                <div class="rate-item" id="req-rate-block" style="display: none;">
+                    <span class="rate-label">REQ</span>
+                    <span class="rate-value" id="required-rr">12.50</span>
+                </div>
+                <div class="rate-item">
+                    <span class="rate-label">LAST 5 OVERS</span>
+                    <span class="rate-value" id="last-five">48/1</span>
+                </div>
+            </div>
+
+            <!-- Batsmen Info -->
+            <div class="batsmen-panel">
+                <div class="batsman-row striker" id="batsman-1-row">
+                    <div class="batsman-indicator">●</div>
+                    <span class="batsman-name" id="batsman-1-name">V Kohli</span>
+                    <div class="batsman-stats">
+                        <span class="batsman-runs" id="batsman-1-runs">67</span>
+                        <span class="batsman-balls"  id="batsman-1-balls">(42)</span>
+                    </div>
+                    <div class="batsman-sr" id="batsman-1-sr">SR 159.5</div>
+                    <div class="batsman-details">
+                        <span class="detail-item" id="batsman-1-fours">4s: 6</span>
+                        <span class="detail-item" id="batsman-1-sixes">6s: 3</span>
+                    </div>
+                </div>
+                <div class="batsman-row" id="batsman-2-row">
+                    <div class="batsman-indicator dim">●</div>
+                    <span class="batsman-name" id="batsman-2-name">H Pandya</span>
+                    <div class="batsman-stats">
+                        <span class="batsman-runs" id="batsman-2-runs">23</span>
+                        <span class="batsman-balls" id="batsman-2-balls">(15)</span>
+                    </div>
+                    <div class="batsman-sr" id="batsman-2-sr">SR 153.3</div>
+                    <div class="batsman-details">
+                        <span class="detail-item" id="batsman-2-fours">4s: 2</span>
+                        <span class="detail-item" id="batsman-2-sixes">6s: 1</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bowler Info -->
+            <div class="bowler-panel">
+                <div class="bowler-row">
+                    <span class="bowler-label">BOWLING</span>
+                    <span class="bowler-name" id="bowler-name">M Starc</span>
+                    <div class="bowler-figures">
+                        <span class="bowler-stat" id="bowler-figures">2/34</span>
+                        <span class="bowler-overs" id="bowler-overs">(3.3 ov)</span>
+                    </div>
+                    <span class="bowler-econ" id="bowler-econ">ECON 9.71</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- COMMENTARY TICKER — Bottom strip -->
+        <!-- ============================================ -->
+        <div class="commentary-ticker">
+            <div class="ticker-ball-indicator" id="ticker-event">SIX</div>
+            <div class="ticker-text" id="ticker-commentary">
+                छक्का! कोहली ने Starc की गेंद को लॉन्ग ऑन पार भेजा! क्या शानदार शॉट!
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- THIS OVER — Ball-by-ball strip -->
+        <!-- ============================================ -->
+        <div class="over-strip">
+            <span class="over-label">THIS OVER</span>
+            <div class="ball-indicators" id="ball-indicators">
+                <span class="ball dot">0</span>
+                <span class="ball single">1</span>
+                <span class="ball boundary">4</span>
+                <span class="ball dot">0</span>
+                <span class="ball six">6</span>
+                <span class="ball wicket">W</span>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- PARTNERSHIP — Small info block -->
+        <!-- ============================================ -->
+        <div class="partnership-block">
+            <span class="partnership-label">PARTNERSHIP</span>
+            <span class="partnership-value" id="partnership">52 (31)</span>
+        </div>
+
+        <!-- Branding watermark -->
+        <div class="watermark">
+            <span class="watermark-text">🏏 CRICKET COMMENTARY LIVE</span>
+        </div>
+    </div>
+</body>
+</html>

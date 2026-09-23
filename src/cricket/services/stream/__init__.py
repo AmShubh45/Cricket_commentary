@@ -1,0 +1,1 @@
+"""Stream publisher package."""

@@ -1,0 +1,88 @@
+services:
+  # --- PostgreSQL ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: cricket-postgres
+    environment:
+      POSTGRES_DB: cricket_commentary
+      POSTGRES_USER: cricket
+      POSTGRES_PASSWORD: changeme_in_production
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cricket -d cricket_commentary"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Redis ---
+  redis:
+    image: redis:7-alpine
+    container_name: cricket-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- FastAPI Application ---
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cricket-app
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./templates:/app/templates
+      - ./output:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn cricket.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # --- Celery Worker ---
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cricket-worker
+    env_file: .env
+    volumes:
+      - ./src:/app/src
+      - ./templates:/app/templates
+      - ./output:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A cricket.workers.celery_app worker --loglevel=info --concurrency=4
+
+  # --- Celery Beat (Scheduler) ---
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cricket-beat
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A cricket.workers.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:

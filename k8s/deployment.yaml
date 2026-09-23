@@ -1,0 +1,198 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cricket-config
+  namespace: cricket
+data:
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  APP_LOG_LEVEL: "INFO"
+  REDIS_URL: "redis://redis-svc:6379/0"
+  REDIS_MATCH_STATE_DB: "1"
+  CELERY_BROKER_URL: "redis://redis-svc:6379/2"
+  CELERY_RESULT_BACKEND: "redis://redis-svc:6379/3"
+  DATA_FEED_PROVIDER: "cricketdata"
+  CRICKETDATA_BASE_URL: "https://api.cricapi.com/v1"
+  DATA_POLL_INTERVAL_SECONDS: "30"
+  TTS_PROVIDER: "edge_tts"
+  TTS_VOICE_ID: "hi-IN-SwaraNeural"
+  LLM_PROVIDER: "bedrock"
+  BEDROCK_MODEL_ID: "amazon.nova-micro-v1:0"
+  BEDROCK_MAX_TOKENS: "300"
+  BEDROCK_TEMPERATURE: "0.8"
+  LANGFUSE_ENABLED: "true"
+  FFMPEG_VIDEO_BITRATE: "2500k"
+  FFMPEG_AUDIO_BITRATE: "128k"
+  FFMPEG_FRAMERATE: "30"
+  FFMPEG_RESOLUTION: "1920x1080"
+  COST_TRACKING_ENABLED: "true"
+  MONTHLY_BUDGET_ALERT_INR: "1000"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cricket-secrets
+  namespace: cricket
+type: Opaque
+stringData:
+  CRICKETDATA_API_KEY: "REPLACE_ME"
+  AWS_ACCESS_KEY_ID: "REPLACE_ME"
+  AWS_SECRET_ACCESS_KEY: "REPLACE_ME"
+  AWS_REGION: "us-east-1"
+  LANGFUSE_PUBLIC_KEY: "REPLACE_ME"
+  LANGFUSE_SECRET_KEY: "REPLACE_ME"
+  LANGFUSE_HOST: "https://cloud.langfuse.com"
+  YOUTUBE_RTMP_URL: "rtmp://a.rtmp.youtube.com/live2"
+  YOUTUBE_STREAM_KEY: "REPLACE_ME"
+  POSTGRES_PASSWORD: "REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cricket-api
+  namespace: cricket
+  labels:
+    app: cricket-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cricket-api
+  template:
+    metadata:
+      labels:
+        app: cricket-api
+    spec:
+      containers:
+        - name: api
+          image: cricket-commentary:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: cricket-config
+            - secretRef:
+                name: cricket-secrets
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          command: ["uvicorn", "cricket.main:app", "--host", "0.0.0.0", "--port", "8000"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cricket-api-svc
+  namespace: cricket
+spec:
+  selector:
+    app: cricket-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+# Per-match pipeline pod — one per active live match
+# Deploy dynamically via the API when a match starts
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cricket-worker
+  namespace: cricket
+  labels:
+    app: cricket-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cricket-worker
+  template:
+    metadata:
+      labels:
+        app: cricket-worker
+    spec:
+      containers:
+        - name: worker
+          image: cricket-commentary:latest
+          envFrom:
+            - configMapRef:
+                name: cricket-config
+            - secretRef:
+                name: cricket-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: output-vol
+              mountPath: /app/output
+          command:
+            - celery
+            - -A
+            - cricket.workers.celery_app
+            - worker
+            - --loglevel=info
+            - --concurrency=4
+      restartPolicy: Always
+      volumes:
+        - name: output-vol
+          emptyDir:
+            sizeLimit: 2Gi
+---
+# Celery Beat scheduler
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cricket-beat
+  namespace: cricket
+  labels:
+    app: cricket-beat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cricket-beat
+  template:
+    metadata:
+      labels:
+        app: cricket-beat
+    spec:
+      containers:
+        - name: beat
+          image: cricket-commentary:latest
+          envFrom:
+            - configMapRef:
+                name: cricket-config
+            - secretRef:
+                name: cricket-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          command:
+            - celery
+            - -A
+            - cricket.workers.celery_app
+            - beat
+            - --loglevel=info
