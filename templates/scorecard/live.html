@@ -1136,6 +1136,15 @@
     </div>
     <button class="settings-save-btn" onclick="saveSettings()">💾 Apply Settings</button>
     <div class="settings-saved-msg" id="settings-saved">✅ Settings applied!</div>
+
+    <div class="settings-group" style="border-top: 1px solid rgba(255,255,255,0.15); padding-top: 14px; margin-top: 16px;">
+        <label>Switch Match (ID or Cricbuzz URL)</label>
+        <div style="display:flex; gap:6px; margin-top:4px;">
+            <input type="text" id="set-match-id" placeholder="e.g. 129634 or paste URL" style="flex:1; background:rgba(0,0,0,0.5); border:1px solid #1e3a5f; color:#fff; border-radius:4px; padding:7px 9px; font-size:13px; font-family:'Barlow',sans-serif;">
+            <button type="button" onclick="switchMatchFromUI()" style="background:#1565C0; border:none; color:#fff; padding:7px 14px; border-radius:4px; cursor:pointer; font-weight:700; font-size:12px; transition:0.2s;">Switch</button>
+        </div>
+        <div style="font-size:11px; color:#88a0c0; margin-top:6px;">Current Match ID: <b id="active-match-span" style="color:#FFC107;">...</b></div>
+    </div>
 </div>
 
 <!-- WS Disconnect Overlay -->
@@ -1565,7 +1574,11 @@ let ws;
 let wsDisconnected = false;
 function connectWebSocket() {
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${protocol}://${location.host}/ws`);
+    const params = new URLSearchParams(window.location.search);
+    const matchParam = params.get('match_id') || params.get('match');
+    const wsUrl = `${protocol}://${location.host}/ws${matchParam ? '?match_id=' + encodeURIComponent(matchParam) : ''}`;
+
+    ws = new WebSocket(wsUrl);
     ws.onopen = () => {
         wsDisconnected = false;
         document.getElementById('ws-disconnect-bar').classList.remove('show');
@@ -1573,6 +1586,19 @@ function connectWebSocket() {
     ws.onmessage = evt => {
         try {
             const data = JSON.parse(evt.data);
+            if (data.type === 'match_switched') {
+                const span = document.getElementById('active-match-span');
+                if (span) span.textContent = data.match_id;
+                const txt = document.getElementById('comm-hindi');
+                if (txt) txt.textContent = data.message || `Switched to match ${data.match_id}`;
+                const tag = document.getElementById('comm-tag');
+                if (tag) tag.textContent = 'SWITCHING';
+                return;
+            }
+            if (data.scorecard && data.scorecard.match_id) {
+                const span = document.getElementById('active-match-span');
+                if (span) span.textContent = data.scorecard.match_id;
+            }
             enqueueMsg(data);
         } catch(_) {}
     };
@@ -1686,7 +1712,44 @@ async function saveSettings() {
     }
 }
 
-// Load current settings on page load
+// Switch Match via UI input
+async function switchMatchFromUI() {
+    const input = document.getElementById('set-match-id');
+    const rawVal = input ? input.value.trim() : '';
+    if (!rawVal) return;
+    try {
+        const resp = await fetch('/api/match/switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ match_id: rawVal })
+        });
+        const res = await resp.json();
+        if (res.status === 'ok') {
+            const span = document.getElementById('active-match-span');
+            if (span) span.textContent = res.match_id;
+            // Update URL without full reload
+            const newUrl = new URL(window.location);
+            newUrl.searchParams.set('match_id', res.match_id);
+            window.history.replaceState({}, '', newUrl);
+            input.value = '';
+            const msg = document.getElementById('settings-saved');
+            if (msg) {
+                msg.textContent = `✅ Switched to match ${res.match_id}!`;
+                msg.classList.add('show');
+                setTimeout(() => {
+                    msg.classList.remove('show');
+                    msg.textContent = '✅ Settings applied!';
+                }, 3000);
+            }
+        } else {
+            alert('Failed to switch match: ' + (res.error || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Error switching match:', e);
+    }
+}
+
+// Load current settings and active match on page load
 (async () => {
     try {
         const resp = await fetch('/api/settings');
@@ -1696,6 +1759,14 @@ async function saveSettings() {
             if (s.commentator_style) document.getElementById('set-style').value = s.commentator_style;
             if (s.tts_provider) document.getElementById('set-tts').value = s.tts_provider;
             if (s.tts_voice) document.getElementById('set-voice').value = s.tts_voice;
+        }
+    } catch(_) {}
+    try {
+        const respMatch = await fetch('/api/match');
+        if (respMatch.ok) {
+            const m = await respMatch.json();
+            const span = document.getElementById('active-match-span');
+            if (span && m.match_id) span.textContent = m.match_id;
         }
     } catch(_) {}
 })();

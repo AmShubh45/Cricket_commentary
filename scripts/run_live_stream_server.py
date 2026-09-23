@@ -54,6 +54,8 @@ from cricket.infra.factory import ProviderFactory
 from cricket.providers.data_feed.cricbuzz import CricbuzzProvider
 from cricket.providers.llm.free_llm import FreeLLMProvider
 
+from contextlib import asynccontextmanager
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -61,15 +63,74 @@ logging.basicConfig(
 )
 logger = logging.getLogger("LiveStreamServer")
 
-from contextlib import asynccontextmanager
+def extract_match_id(val: str | None) -> str | None:
+    """Extract a 4-8 digit Cricbuzz match ID from a raw ID or Cricbuzz URL."""
+    if not val:
+        return None
+    val = str(val).strip()
+    m = re.search(r'(?:/live-cricket-scores/|/cricket-scores/|/live-cricket-scorecard/|^)(\d{4,8})', val)
+    if m:
+        return m.group(1)
+    m = re.search(r'\b(\d{4,8})\b', val)
+    if m:
+        return m.group(1)
+    return None
+
+
+current_match_id: str = os.getenv("CRICKET_MATCH_ID", "163061")
+current_poller_task: asyncio.Task | None = None
+_switch_lock = asyncio.Lock()
+
+
+async def switch_match(new_match_id: str) -> bool:
+    """Dynamically switch the active live match without restarting the server."""
+    global current_match_id, current_poller_task, current_match_state
+    extracted = extract_match_id(new_match_id)
+    if not extracted:
+        logger.warning("Invalid match ID provided: %s", new_match_id)
+        return False
+
+    async with _switch_lock:
+        if extracted == current_match_id and current_poller_task and not current_poller_task.done():
+            logger.info("Match %s is already running.", extracted)
+            return True
+
+        logger.info("🔄 Switching live match: %s -> %s", current_match_id, extracted)
+        current_match_id = extracted
+        os.environ["CRICKET_MATCH_ID"] = extracted
+
+        # Cancel current poller task
+        if current_poller_task and not current_poller_task.done():
+            current_poller_task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(current_poller_task), timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+
+        # Reset state so broadcast screens clear old data
+        current_match_state = {}
+        await manager.broadcast({
+            "type": "match_switched",
+            "match_id": extracted,
+            "message": f"Switching to Match ID {extracted}...",
+        })
+
+        poll_sec = int(os.getenv("CRICKET_POLL_INTERVAL", "8"))
+        current_poller_task = asyncio.create_task(live_cricket_poller(match_id=extracted, poll_interval=poll_sec))
+        return True
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    match_id = os.getenv("CRICKET_MATCH_ID", "163061")
+    global current_poller_task, current_match_id
+    current_match_id = os.getenv("CRICKET_MATCH_ID", "163061")
     poll_sec = int(os.getenv("CRICKET_POLL_INTERVAL", "8"))
-    poller_task = asyncio.create_task(live_cricket_poller(match_id=match_id, poll_interval=poll_sec))
+    logger.info("Starting live poller for initial match ID %s", current_match_id)
+    current_poller_task = asyncio.create_task(live_cricket_poller(match_id=current_match_id, poll_interval=poll_sec))
     yield
-    poller_task.cancel()
+    if current_poller_task:
+        current_poller_task.cancel()
+
 
 app = FastAPI(title="Cricket Live Stream Server", lifespan=lifespan)
 
@@ -174,22 +235,65 @@ current_match_state: dict[str, Any] = {}
 
 
 @app.get("/", response_class=HTMLResponse)
-async def get_live_screen() -> HTMLResponse:
-    """Serve the full-screen broadcast interface."""
+async def get_live_screen(match_id: str | None = None, match: str | None = None) -> HTMLResponse:
+    """Serve the full-screen broadcast interface, optionally switching match if match_id is passed."""
+    target = match_id or match
+    if target:
+        extracted = extract_match_id(target)
+        if extracted and extracted != current_match_id:
+            logger.info("URL query param requested match switch: %s", extracted)
+            await switch_match(extracted)
     live_html_path = templates_dir / "live.html"
     return HTMLResponse(content=live_html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/live", response_class=HTMLResponse)
+async def get_live_screen_alias(match_id: str | None = None, match: str | None = None) -> HTMLResponse:
+    """Alias for GET /"""
+    return await get_live_screen(match_id=match_id, match=match)
+
+
+@app.get("/api/match")
+async def get_active_match():
+    """Return the currently active match ID."""
+    return {"match_id": current_match_id}
+
+
+@app.post("/api/match/switch")
+async def api_switch_match(request: Request):
+    """Switch match dynamically via API."""
+    data = await request.json()
+    req_id = data.get("match_id") or data.get("match")
+    if not req_id:
+        return {"error": "Missing match_id in request body"}
+    success = await switch_match(str(req_id))
+    return {"status": "ok" if success else "error", "match_id": current_match_id}
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time scorecard and commentary streaming."""
+    # Check if client connected with ?match_id=... or ?match=...
+    match_param = websocket.query_params.get("match_id") or websocket.query_params.get("match")
+    if match_param:
+        extracted = extract_match_id(match_param)
+        if extracted and extracted != current_match_id:
+            logger.info("WebSocket connection requested match switch: %s", extracted)
+            await switch_match(extracted)
+
     await manager.connect(websocket)
     # Send initial state immediately
     if current_match_state:
         await websocket.send_text(json.dumps(current_match_state))
     try:
         while True:
-            await websocket.receive_text()
+            text = await websocket.receive_text()
+            try:
+                data = json.loads(text)
+                if data.get("action") == "switch_match" and data.get("match_id"):
+                    await switch_match(str(data["match_id"]))
+            except Exception:
+                pass
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
